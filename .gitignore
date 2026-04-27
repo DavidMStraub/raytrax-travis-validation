@@ -1,0 +1,39 @@
+# AI stuff
+.claude/
+
+# local folder with outdated stuff
+old/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Results and scan outputs
+results/
+
+# TRAVIS run artifacts
+beamtrace_*
+Pabs_Icd_profiles_*
+run.status
+travis_input.data
+mesh.bin4
+equilibrium.md5
+*.tmp
+
+# WandB
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+plots.ipynb
+
+# Editor
+.idea/
+.vscode/
+*.swp

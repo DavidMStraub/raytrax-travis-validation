@@ -1,0 +1,11 @@
+raytrax==0.4.0
+
+jax>=0.10.0
+jaxtyping>=0.3.2
+numpy>=2.3.0
+scipy>=1.16.1
+matplotlib>=3.10.5
+pandas>=2.3.1
+tqdm>=4.67.1
+wandb>=0.25.1
+python-dotenv>=1.2.2

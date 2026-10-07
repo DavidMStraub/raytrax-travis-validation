@@ -789,6 +789,47 @@ def print_absorption_report(cmp: AbsorptionComparison) -> None:
 
 # ── Scenario runner ───────────────────────────────────────────────────────────
 
+def build_travis_input(
+    params: AbsorptionScenarioParams,
+    wout_nc: Path,
+    travis_hgrid: float = 0.022,
+    travis_dphi: float = 2.0,
+    travis_rk_accuracy: float = 1e-5,
+    travis_max_rk_stepsize: float = 10.0,
+    travis_resonance_umax: float = 7.0,
+    travis_resonance_grid_points: int = 700,
+    travis_input_format: str = "legacy",
+) -> TravisECRHInput:
+    """TRAVIS single-ray input for an absorption scenario (arguments as in `run_absorption_scenario`)."""
+    rho_np, ne_np, te_np = build_profiles(
+        params.ne_central, params.ne_parm, params.te_central, params.te_parm
+    )
+    return TravisECRHInput(
+        antenna_position_cyl=jnp.array(params.antenna_cyl),
+        target_position=jnp.array(params.target_cart),
+        frequency_ghz=params.frequency_ghz,
+        power_mw=params.power_mw,
+        equilibrium_file=str(wout_nc),
+        target_coords_type="cart",
+        mode=params.mode,
+        rho_grid=jnp.array(rho_np),
+        electron_density_1e20=jnp.array(ne_np),
+        electron_temperature_keV=jnp.array(te_np),
+        b0_normalization=params.b0_target,
+        dielectric_tracing="cold",
+        hamiltonian="West",
+        ne_parm=params.ne_parm,
+        te_parm=params.te_parm,
+        hgrid=travis_hgrid,
+        dphi=travis_dphi,
+        rk_accuracy=travis_rk_accuracy,
+        max_rk_stepsize_wavelengths=travis_max_rk_stepsize,
+        resonance_umax=travis_resonance_umax,
+        resonance_grid_points=travis_resonance_grid_points,
+        input_format=travis_input_format,
+    )
+
+
 def run_absorption_scenario(
     params: AbsorptionScenarioParams,
     eq: MagneticConfiguration,
@@ -848,29 +889,15 @@ travis_resonance_umax / travis_resonance_grid_points: Upper velocity limit
         print(f"Running TRAVIS  [{label}  f={params.frequency_ghz:.1f} GHz  "
               f"B₀={params.b0_target:.2f} T]  (profiles: {t_profiles:.3f}s) …")
     t0_travis = time.perf_counter()
-    travis_params = TravisECRHInput(
-        antenna_position_cyl=jnp.array(params.antenna_cyl),
-        target_position=jnp.array(params.target_cart),
-        frequency_ghz=params.frequency_ghz,
-        power_mw=params.power_mw,
-        equilibrium_file=str(wout_nc),
-        target_coords_type="cart",
-        mode=params.mode,
-        rho_grid=jnp.array(rho_np),
-        electron_density_1e20=jnp.array(ne_np),
-        electron_temperature_keV=jnp.array(te_np),
-        b0_normalization=params.b0_target,
-        dielectric_tracing="cold",
-        hamiltonian="West",
-        ne_parm=params.ne_parm,
-        te_parm=params.te_parm,
-        hgrid=travis_hgrid,
-        dphi=travis_dphi,
-        rk_accuracy=travis_rk_accuracy,
-        max_rk_stepsize_wavelengths=travis_max_rk_stepsize,
-        resonance_umax=travis_resonance_umax,
-        resonance_grid_points=travis_resonance_grid_points,
-        input_format=travis_input_format,
+    travis_params = build_travis_input(
+        params, wout_nc,
+        travis_hgrid=travis_hgrid,
+        travis_dphi=travis_dphi,
+        travis_rk_accuracy=travis_rk_accuracy,
+        travis_max_rk_stepsize=travis_max_rk_stepsize,
+        travis_resonance_umax=travis_resonance_umax,
+        travis_resonance_grid_points=travis_resonance_grid_points,
+        travis_input_format=travis_input_format,
     )
     travis = run_travis(
         travis_exe, travis_params,

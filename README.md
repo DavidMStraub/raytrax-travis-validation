@@ -110,6 +110,18 @@ python scan.py --step 2 --n-samples 1000 --seed 1 --wandb-project raytrax-valida
 
 Absolute values: `tau_final_rx`/`tau_final_tr`, `total_power_rx_mw`/`total_power_tr_mw`, `depo_rho_mean_rx`/`depo_rho_mean_tr` (NaN if nothing is absorbed), `resonance_accessible` (the TRAVIS absorption peak lies at the intended harmonic), `pos_rms_mm`, wall times and `n_steps_rx`.
 
+### Single samples
+
+`travis_case.py` writes the TRAVIS input of individual scan samples. It regenerates the scenarios with the scan's seed (default 1), so sample N is `run_N` of the scan.
+
+```bash
+python travis_case.py 1 811 --output-dir cases                                   # TRAVIS 13.3.1 input layout
+python travis_case.py 1 811 --travis-input-format v13.3.7 --output-dir cases_new  # TRAVIS 13.3.7 and newer
+python travis_case.py 1 --run --travis-exe /path/to/travis-nc                     # also run TRAVIS, print τ
+```
+
+Each `<output-dir>/run_N/travis_input.data` refers to `<output-dir>/w7x.nc` by absolute path. To run TRAVIS by hand, call `travis-nc travis_input.data` inside the run directory.
+
 ## Command-line options of `scan.py`
 
 | Flag | Default | Description |

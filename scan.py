@@ -212,6 +212,40 @@ def _scan_step1(args: argparse.Namespace) -> None:
     finish_scan(dry_run=args.dry_run)
 
 
+_STEP2_SAMPLE_KWARGS = dict(
+    antenna_r_min=ANTENNA_R_MIN,
+    antenna_r_max=ANTENNA_R_MAX,
+    antenna_z_max=ANTENNA_Z_MAX,
+    target_r_min=TARGET_R_MIN,
+    target_r_max=TARGET_R_MAX,
+    target_z_max=TARGET_Z_MAX,
+    target_rho_max=TARGET_RHO_MAX,
+    b0_target=B0_TARGET_STEP2,
+)
+
+
+def step2_scenarios(rho_interp, B_interp, seed: int):
+    """Yield the step-2 scenarios of a scan with the given seed, in scan order.
+
+    Cycles through all four (harmonic, mode) combinations so each is
+    represented roughly equally across the scan.
+    """
+    combos = [(1, "X"), (1, "O"), (2, "X"), (2, "O")]
+    f_ranges = {h: compute_resonance_frequency_range(B_interp, rho_interp, harmonic=h) for h in (1, 2)}
+    rng = np.random.default_rng(seed)
+    i = 0
+    while True:
+        harmonic, mode = combos[i % len(combos)]
+        f_lo, f_hi = f_ranges[harmonic]
+        yield sample_absorption_scenario(
+            harmonic, cast(Literal["O", "X"], mode),
+            rho_interp, B_interp, rng,
+            f_lo_ghz=f_lo, f_hi_ghz=f_hi,
+            **_STEP2_SAMPLE_KWARGS,
+        )
+        i += 1
+
+
 def _scan_step2(args: argparse.Namespace) -> None:
     travis_exe = resolve_travis_exe(args.travis_exe)
     output_dir = args.output_dir
@@ -285,43 +319,21 @@ def _scan_step2(args: argparse.Namespace) -> None:
 
     mesh_cache_dir = args.mesh_cache_dir
 
-    # Cycle through all four (harmonic, mode) combinations so each is
-    # represented roughly equally across the scan.
-    _combos = [(1, "X"), (1, "O"), (2, "X"), (2, "O")]
-    _f_ranges = {1: (f_lo_h1, f_hi_h1), 2: (f_lo_h2, f_hi_h2)}
-
-    sample_kwargs = dict(
-        antenna_r_min=ANTENNA_R_MIN,
-        antenna_r_max=ANTENNA_R_MAX,
-        antenna_z_max=ANTENNA_Z_MAX,
-        target_r_min=TARGET_R_MIN,
-        target_r_max=TARGET_R_MAX,
-        target_z_max=TARGET_Z_MAX,
-        target_rho_max=TARGET_RHO_MAX,
-        b0_target=B0_TARGET_STEP2,
-    )
-
     # Warm up raytrax JIT before starting the clock
     print("Warming up raytrax JIT …")
     _warmup_params = sample_absorption_scenario(
         2, "X", rho_interp, B_interp, np.random.default_rng(0),
         f_lo_ghz=f_lo_h2, f_hi_ghz=f_hi_h2,
-        **sample_kwargs,
+        **_STEP2_SAMPLE_KWARGS,
     )
     _warmup_jit(eq, _warmup_params, args.max_step_size, args.raytrax_rtol, args.raytrax_atol)
 
-    rng = np.random.default_rng(args.seed)
+    scenarios = step2_scenarios(rho_interp, B_interp, args.seed)
     n_ok, n_fail = 0, 0
     bar = tqdm(range(args.n_samples), unit="run", dynamic_ncols=True)
     for i in bar:
-        harmonic, mode = _combos[i % len(_combos)]
-        f_lo, f_hi = _f_ranges[harmonic]
-        params = sample_absorption_scenario(
-            harmonic, cast(Literal["O", "X"], mode),
-            rho_interp, B_interp, rng,
-            f_lo_ghz=f_lo, f_hi_ghz=f_hi,
-            **sample_kwargs,
-        )
+        params = next(scenarios)
+        harmonic, mode = params.harmonic, params.mode
         run_dir = output_dir / f"run_{i:05d}"
         run_dir.mkdir(exist_ok=True)
 

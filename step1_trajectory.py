@@ -562,6 +562,9 @@ def run_scenario(
     travis_dphi: float = 2.0,
     travis_rk_accuracy: float = 1e-5,
     travis_max_rk_stepsize: float = 10.0,
+    travis_input_format: str = "legacy",
+    b_interp=None,
+    rho_interp=None,
 ) -> TrajectoryComparison:
     """Run one TRAVIS + raytrax scenario and return the comparison."""
 
@@ -597,6 +600,7 @@ def run_scenario(
         dphi=travis_dphi,
         rk_accuracy=travis_rk_accuracy,
         max_rk_stepsize_wavelengths=travis_max_rk_stepsize,
+        input_format=travis_input_format,
     )
     travis = run_travis(travis_exe, travis_params, output_dir=output_dir / "travis_run",
                         mesh_cache_dir=mesh_cache_dir)
@@ -629,8 +633,8 @@ def run_scenario(
     if verbose:
         print("Computing direction sensitivity …")
     interpolators = Interpolators(
-        magnetic_field=build_magnetic_field_interpolator(eq),
-        rho=build_rho_interpolator(eq),
+        magnetic_field=b_interp if b_interp is not None else build_magnetic_field_interpolator(eq),
+        rho=rho_interp if rho_interp is not None else build_rho_interpolator(eq),
         electron_density=build_electron_density_profile_interpolator(profiles),
         electron_temperature=build_electron_temperature_profile_interpolator(profiles),
         is_axisymmetric=eq.is_axisymmetric,

@@ -1,4 +1,4 @@
-raytrax==0.4.0
+raytrax @ git+https://github.com/proximafusion/raytrax.git@76eb0d5dc3fa960c015716d5dd2725cc27e3a306
 
 jax>=0.10.0
 jaxtyping>=0.3.2

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run Step 2 (absorption) scans with identical sampling (seed=1, 5000 samples),
-# cycling equally through X1/O1/X2/O2 (1250 each).
+# Run Step 2 (absorption) scans with identical sampling (seed=1, 1000 samples),
+# cycling equally through X1/O1/X2/O2 (250 each).
 #
 # Scans:
 #   1. default   — raytrax defaults (rtol=1e-4, atol=1e-6, max_step=0.05 m)
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-COMMON="--step 2 --seed 1 --n-samples 5000 --wandb-project raytrax-validation"
+COMMON="--step 2 --seed 1 --n-samples 1000 --wandb-project raytrax-validation"
 
 echo "============================================================"
 echo " Scan 1/2: default settings"

@@ -143,6 +143,7 @@ def _scan_step1(args: argparse.Namespace) -> None:
         "travis_max_rk_stepsize": args.travis_max_rk_stepsize,
         "travis_resonance_umax": args.travis_resonance_umax,
         "travis_resonance_grid_points": args.travis_resonance_grid_points,
+        "travis_input_format":   args.travis_input_format,
         "f_min_ghz":             f_min_ghz,
         "f_max_ghz":             f_max_ghz,
     }
@@ -189,16 +190,21 @@ def _scan_step1(args: argparse.Namespace) -> None:
                                travis_hgrid=args.travis_hgrid,
                                travis_dphi=args.travis_dphi,
                                travis_rk_accuracy=args.travis_rk_accuracy,
-                               travis_max_rk_stepsize=args.travis_max_rk_stepsize)
+                               travis_max_rk_stepsize=args.travis_max_rk_stepsize,
+                               travis_input_format=args.travis_input_format,
+                               b_interp=B_interp,
+                               rho_interp=rho_interp)
             log_sample(params, cmp, step=i, dry_run=args.dry_run)
             n_ok += 1
         except Exception as exc:
             tqdm.write(f"  run_{i:05d} FAILED: {exc}")
             log_sample(params, None, step=i, error=str(exc), dry_run=args.dry_run)
             n_fail += 1
-        
-        # Clear JAX cache and run garbage collection every 100 samples to prevent OOM
-        if (i + 1) % 100 == 0:
+
+        # Clear JAX compilation cache and run GC every 10 samples to prevent OOM.
+        # (Residual per-step accumulation from vmap retracing on variable TRAVIS
+        # output lengths; flushed frequently so it cannot reach GB-scale.)
+        if (i + 1) % 10 == 0:
             jax.clear_caches()
             gc.collect()
 
@@ -268,6 +274,7 @@ def _scan_step2(args: argparse.Namespace) -> None:
         "travis_max_rk_stepsize": args.travis_max_rk_stepsize,
         "travis_resonance_umax": args.travis_resonance_umax,
         "travis_resonance_grid_points": args.travis_resonance_grid_points,
+        "travis_input_format":   args.travis_input_format,
         "f_lo_h1_ghz":           f_lo_h1,
         "f_hi_h1_ghz":           f_hi_h1,
         "f_lo_h2_ghz":           f_lo_h2,
@@ -338,6 +345,7 @@ def _scan_step2(args: argparse.Namespace) -> None:
                 travis_max_rk_stepsize=args.travis_max_rk_stepsize,
                 travis_resonance_umax=args.travis_resonance_umax,
                 travis_resonance_grid_points=args.travis_resonance_grid_points,
+                travis_input_format=args.travis_input_format,
             )
             log_sample(params, cmp, step=i, dry_run=args.dry_run)
             n_ok += 1
@@ -365,6 +373,8 @@ def main() -> None:
     parser.add_argument("--n-samples", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--travis-exe", type=Path, default=None)
+    parser.add_argument("--travis-input-format", choices=["legacy", "v13.3.7"], default="legacy",
+                        help="TRAVIS input-file layout (default legacy = old TRAVIS versions).")
     parser.add_argument("--equilibrium", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("results/scan"))
     parser.add_argument("--wandb-project", type=str, default="raytrax-validation")

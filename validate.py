@@ -25,6 +25,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--travis-exe", type=Path, default=None)
+    parser.add_argument("--travis-input-format", choices=["legacy", "v13.3.7"], default="legacy",
+                        help="TRAVIS input-file layout (default legacy = old TRAVIS versions).")
     parser.add_argument("--equilibrium", type=Path, default=None,
                         help="VMEC wout NetCDF for TRAVIS; exported automatically if omitted.")
     parser.add_argument("--output-dir", type=Path, default=Path("results/trajectory"))
@@ -64,7 +66,8 @@ def main() -> None:
             wout.save(wout_nc)
 
     run_scenario(default_scenario_params(), eq, wout_nc, travis_exe, output_dir,
-                 max_step_size=args.max_step_size)
+                 max_step_size=args.max_step_size,
+                 travis_input_format=args.travis_input_format)
 
 
 if __name__ == "__main__":

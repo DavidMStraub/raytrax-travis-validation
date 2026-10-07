@@ -34,10 +34,10 @@ import wandb
 
 RUNS = [
     ("default",          "step1_default"),
-    # ("hifi rx solver",   "step1_hifi_rx_solver"),   # outdated scan
+    ("hifi rx solver",   "step1_hifi_rx_solver"),
     ("hifi rx interp",   "step1_hifi_rx_interp"),
     ("hifi travis mesh", "step1_hifi_travis_mesh"),
-    # ("hifi travis RK",   "step1_hifi_travis_solver"),  # outdated scan
+    ("hifi travis RK",   "step1_hifi_travis_solver"),
 ]
 
 # (column key, display label, unit, pass/fail threshold, x_max clip, cell fmt)

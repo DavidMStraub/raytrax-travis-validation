@@ -102,6 +102,10 @@ class TravisECRHInput:
     third value in Max_power_of_larmor_expansion_and_grid_parms). Default 700; use 1500
     for O2 mode for finer velocity-space resolution."""
 
+    input_format: Literal["legacy", "v13.3.7"] = "legacy"
+    """Layout of the TRAVIS input file: 'legacy' (old positional layout) or 'v13.3.7'
+    (dielectric-tensor and pass-count lines as read by TRAVIS v13.3.7). Same physics settings."""
+
 
 @dataclass
 class TravisECRHOutput:
@@ -117,7 +121,7 @@ class TravisECRHOutput:
     """Arc length along ray in meters."""
 
     optical_depth: Float[Array, " n_points"]
-    """Optical depth (tau) along trajectory."""
+    """Optical depth (beamtrace column `tau`) along trajectory."""
 
     rho: Float[Array, " n_points"]
     """Normalized flux coordinate along trajectory."""
@@ -140,14 +144,8 @@ class TravisECRHOutput:
     magnetic_field_cart: Float[Array, "n_points 3"]
     """Magnetic field vector (Bx, By, Bz) in Cartesian coordinates [T]."""
 
-    rho_profile: Float[Array, " n_rho"]
-    """Radial grid for integrated power deposition profile."""
-
-    power_density_w_per_m3: Float[Array, " n_rho"]
-    """Power density profile in W/m^3."""
-
     total_absorbed_power_mw: float
-    """Total absorbed power in MW."""
+    """Total absorbed power in MW, input power times (1 - exp(-tau_final))."""
 
     success: bool
     """Whether TRAVIS execution completed successfully."""
@@ -161,6 +159,8 @@ def _equilibrium_hash(params: TravisECRHInput) -> str:
     h = hashlib.md5()
     h.update(Path(params.equilibrium_file).read_bytes())
     h.update(f"hgrid={params.hgrid}|dphi={params.dphi}".encode())
+    if params.input_format != "legacy":  # keep legacy hashes (and caches) unchanged
+        h.update(f"|format={params.input_format}".encode())
     return h.hexdigest()
 
 
@@ -226,7 +226,7 @@ def _run_travis_internal(
             shutil.copy2(mesh_file, mesh_cache_dir / _MESH_FILE)
             (mesh_cache_dir / _MESH_HASH_FILE).write_text(_equilibrium_hash(params))
 
-    return _parse_travis_output(output_dir)
+    return _parse_travis_output(output_dir, params.power_mw)
 
 
 def _write_travis_input_files(
@@ -283,6 +283,18 @@ Te-parm {te_parm_str}"""
         params.target_coords_type, params.target_coords_type
     )
 
+    if params.input_format == "v13.3.7":
+        # v13.3.7 reads (nhmax, krmax, ifdamp0) and then (umaxgrid, nugrid); passes: 1 value
+        diel_lines = f"""Upper_cycl.harmonic_in_diel.tensor_(0_for_auto) 0 1 0
+Momentum_grid_params[umax,Nmax] {params.resonance_umax} {params.resonance_grid_points}"""
+        passes_line = "Number_of_passes 1"
+    elif params.input_format == "legacy":
+        diel_lines = f"""Dielectric_tensor_summation_limit_[0_for_auto] 0
+Max_power_of_larmor_expansion_and_grid_parms 1 {params.resonance_umax} {params.resonance_grid_points}"""
+        passes_line = "Number_of_passes_and_reflection_coefficients 1 1 1"
+    else:
+        raise ValueError(f"Unknown input_format: {params.input_format!r}")
+
     input_content = f"""***This_is_input_file_for_TRAVIS_ECRH_code***
 TempDirectory ./
 Vessel_Configuration nofile
@@ -331,11 +343,10 @@ max_RK_iterations {params.max_steps}
 min_RK_stepsize_[wave_length] 1e-05
 max_RK_stepsize_[wave_length] {params.max_rk_stepsize_wavelengths}
 RK_accuracy {params.rk_accuracy}
-Dielectric_tensor_summation_limit_[0_for_auto] 0
-Max_power_of_larmor_expansion_and_grid_parms 1 {params.resonance_umax} {params.resonance_grid_points}
+{diel_lines}
 Dielectric_tensor_model_for_tracing {params.dielectric_tracing}
 Hamiltonian_for_tracing {params.hamiltonian}
-Number_of_passes_and_reflection_coefficients 1 1 1
+{passes_line}
 """
 
     with open(input_file, "w") as f:
@@ -365,19 +376,14 @@ def _execute_travis(travis_executable: Path, output_dir: Path) -> None:
         raise RuntimeError(f"TRAVIS execution failed: {result.stderr}")
 
 
-def _parse_travis_output(output_dir: Path) -> TravisECRHOutput:
-    """Parse TRAVIS output files."""
+def _parse_travis_output(output_dir: Path, power_mw: float) -> TravisECRHOutput:
+    """Parse the TRAVIS beamtrace file of a single-ray run."""
     beamtrace_file = output_dir / "beamtrace_1"
     if not beamtrace_file.exists():
         raise RuntimeError("TRAVIS output file beamtrace_1 not found")
 
-    traj_data = _parse_beamtrace(beamtrace_file)
-
-    profile_file = output_dir / "Pabs_Icd_profiles_1"
-    if not profile_file.exists():
-        raise RuntimeError("TRAVIS output file Pabs_Icd_profiles_1 not found")
-
-    profile_data = _parse_radial_profile(profile_file)
+    traj_data = _parse_beamtrace(beamtrace_file, power_mw)
+    tau_final = float(traj_data["optical_depth"][-1])
 
     return TravisECRHOutput(
         position_m=traj_data["position_m"],
@@ -391,18 +397,21 @@ def _parse_travis_output(output_dir: Path) -> TravisECRHOutput:
         electron_temperature_keV=traj_data["electron_temperature_keV"],
         magnetic_field_magnitude_T=traj_data["magnetic_field_magnitude_T"],
         magnetic_field_cart=traj_data["magnetic_field_cart"],
-        rho_profile=profile_data["rho"],
-        power_density_w_per_m3=profile_data["power_density_w_per_m3"],
-        total_absorbed_power_mw=profile_data["total_absorbed_power_mw"],
+        total_absorbed_power_mw=power_mw * (1.0 - float(np.exp(-tau_final))),
         success=True,
     )
 
 
-def _parse_beamtrace(filepath: Path) -> dict:
+def _parse_beamtrace(filepath: Path, power_mw: float) -> dict:
     """Parse TRAVIS beamtrace output file.
 
-    Columns: Nray, path, X, Y, Z, Nx, Ny, Nz, rho, ne, Te, |B|,
-             Nper, Npar, Nperc, Nparc, damp0, damp, tau0, tau, ...
+    Columns (0-based): 0 Nray, 1 path, 2-4 X Y Z, 5-7 Nx Ny Nz, 8 rho, 9 ne, 10 Te,
+    11 |B|, 12-15 Nper Npar Nperc Nparc, 16 damp0, 17 damp, 18 tau0, 19 tau, 20 wray0,
+    21 wray, ..., 48-50 Bx By Bz.
+
+    Used here: `damp` is the absorption coefficient d(tau)/ds, `tau` the optical depth
+    and `wray` = exp(-tau) the remaining power fraction. The linear power density is
+    power * wray * damp.
     """
     data = []
     with open(filepath, "r") as f:
@@ -420,37 +429,13 @@ def _parse_beamtrace(filepath: Path) -> dict:
         "refractive_index": data[:, 5:8],
         "arc_length_m": data[:, 1],
         "rho": data[:, 8],
-        "optical_depth": data[:, 18],
-        "absorption_m_inv": data[:, 17],  # damp (col 17); damp0 (col 16) is always zero
-        "linear_power_density_w_per_m": (data[:, 23] + data[:, 24]) * 1e6,  # MW/m → W/m
-        "electron_density_1e20": data[:, 9] / 1e20,  # Column 10: ne in m^-3
-        "electron_temperature_keV": data[:, 10],  # Column 11: Te in keV
+        "optical_depth": data[:, 19],
+        "absorption_m_inv": data[:, 17],
+        "linear_power_density_w_per_m": power_mw * 1e6 * data[:, 21] * data[:, 17],
+        "electron_density_1e20": data[:, 9] / 1e20,  # ne in m^-3
+        "electron_temperature_keV": data[:, 10],
         "magnetic_field_magnitude_T": data[:, 11],
         "magnetic_field_cart": data[:, 48:51],  # Bx, By, Bz [T] Cartesian
-    }
-
-
-def _parse_radial_profile(filepath: Path) -> dict:
-    """Parse TRAVIS radial profile output file.
-
-    Columns: reff/a, dP_p/dV, dP_t/dV, P_p, P_t, dP/dV, Pabs, ...
-    """
-    data = []
-    with open(filepath, "r") as f:
-        f.readline()
-        f.readline()
-
-        for line in f:
-            values = line.split()
-            if len(values) >= 6:
-                data.append([float(v) for v in values])
-
-    data = np.array(data)
-
-    return {
-        "rho": data[:, 0],
-        "power_density_w_per_m3": data[:, 5] * 1e6,
-        "total_absorbed_power_mw": data[-1, 6] if len(data) > 0 else 0.0,
     }
 
 

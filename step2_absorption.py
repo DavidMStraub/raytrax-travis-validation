@@ -140,25 +140,12 @@ class AbsorptionComparison:
     lin_pwr_tr: np.ndarray
     """TRAVIS dP/ds [W/m] on the common grid."""
 
-    # ── radial deposition profile (raytrax native ρ-grid)
-    rho_profile_rx: np.ndarray
-    """raytrax ρ-grid for radial deposition."""
-
-    power_density_rx: np.ndarray
-    """raytrax power density [W/m³] on the ρ-grid."""
-
-    rho_profile_tr: np.ndarray
-    """TRAVIS ρ-grid for radial deposition."""
-
-    power_density_tr: np.ndarray
-    """TRAVIS power density [W/m³] on the ρ-grid."""
-
     # ── scalar summary
     tau_final_rx:       float
     """Final optical depth from raytrax."""
 
     tau_final_tr:       float
-    """Final optical depth from TRAVIS (last point of beamtrace_1)."""
+    """Final optical depth (`tau`) from TRAVIS (last point of beamtrace_1)."""
 
     tau_final_rel_err:  float
     """(τ_final_rx − τ_final_tr) / max(τ_final_tr, 1e-6)."""
@@ -167,16 +154,16 @@ class AbsorptionComparison:
     """Total absorbed power from raytrax [MW]."""
 
     total_power_tr_mw:  float
-    """Total absorbed power from TRAVIS [MW]."""
+    """Total absorbed power from TRAVIS [MW], P_in (1 - exp(-tau_final))."""
 
     total_power_rel_err: float
     """(P_abs_rx − P_abs_tr) / max(P_abs_tr, 1e-6)."""
 
     depo_rho_mean_rx:   float
-    """Flux-surface-volume-weighted mean deposition ρ from raytrax."""
+    """Power-weighted mean deposition ρ along the raytrax ray (NaN if nothing is absorbed)."""
 
     depo_rho_mean_tr:   float
-    """Flux-surface-volume-weighted mean deposition ρ from TRAVIS (centroid of Pabs profile)."""
+    """Power-weighted mean deposition ρ along the TRAVIS ray (NaN if nothing is absorbed)."""
 
     depo_rho_diff:      float
     """⟨ρ⟩_rx − ⟨ρ⟩_tr."""
@@ -547,12 +534,19 @@ def _eval_alpha_from_tr_inputs(
 
 # ── Comparison ────────────────────────────────────────────────────────────────
 
-def _depo_centroid(rho: np.ndarray, pwr: np.ndarray) -> float:
-    """Flux-surface-volume-weighted mean ρ of the deposition profile."""
-    total = float(np.sum(pwr))
-    if total < 1e-30:
+def _depo_centroid(rho: np.ndarray, tau: np.ndarray, min_absorbed: float = 1e-9) -> float:
+    """Mean ρ of the power absorbed along a ray, weighted by the power absorbed per segment.
+
+    The power absorbed between consecutive points is exp(-tau[i-1]) - exp(-tau[i]),
+    in units of the input power. Returns NaN if the total absorbed fraction is below
+    *min_absorbed*.
+    """
+    tau = np.asarray(tau, dtype=float)
+    d_power = np.clip(-np.diff(np.exp(-tau), prepend=1.0), 0.0, None)
+    total = float(np.sum(d_power))
+    if total < min_absorbed:
         return float(np.nan)
-    return float(np.sum(rho * pwr) / total)
+    return float(np.sum(np.asarray(rho) * d_power) / total)
 
 
 def compare_absorption(
@@ -644,13 +638,10 @@ def compare_absorption(
     total_power_rel_err = (total_power_rx_mw - total_power_tr_mw) / pwr_ref
 
     # ── deposition centroid ───────────────────────────────────────────────────
-    rho_prof_rx   = np.asarray(rx.radial_profile.rho)
-    pwr_dens_rx   = np.asarray(rx.radial_profile.volumetric_power_density)
-    depo_rho_rx   = float(rx.deposition_rho_mean)
-
-    rho_prof_tr   = np.asarray(tr.rho_profile)
-    pwr_dens_tr   = np.asarray(tr.power_density_w_per_m3)
-    depo_rho_tr   = _depo_centroid(rho_prof_tr, pwr_dens_tr)
+    depo_rho_rx = _depo_centroid(
+        np.asarray(rx.beam_profile.normalized_effective_radius), tau_rx_all
+    )
+    depo_rho_tr = _depo_centroid(rho_tr_all, np.asarray(tr.optical_depth))
 
     # ── diagnostic 1–3: at TRAVIS xyz ────────────────────────────────────────
     ne_xyz_diff_rel  = None
@@ -713,10 +704,6 @@ def compare_absorption(
         tau_diff=tau_diff,
         lin_pwr_rx=lpwr_rx_c,
         lin_pwr_tr=lpwr_tr_c,
-        rho_profile_rx=rho_prof_rx,
-        power_density_rx=pwr_dens_rx,
-        rho_profile_tr=rho_prof_tr,
-        power_density_tr=pwr_dens_tr,
         tau_final_rx=tau_final_rx,
         tau_final_tr=tau_final_tr,
         tau_final_rel_err=tau_final_rel_err,
@@ -820,6 +807,7 @@ def run_absorption_scenario(
     travis_max_rk_stepsize: float = 10.0,
     travis_resonance_umax: float = 7.0,
     travis_resonance_grid_points: int = 700,
+    travis_input_format: str = "legacy",
 ) -> AbsorptionComparison:
     """Run one TRAVIS + raytrax absorption scenario and return the comparison.
 
@@ -882,6 +870,7 @@ travis_resonance_umax / travis_resonance_grid_points: Upper velocity limit
         max_rk_stepsize_wavelengths=travis_max_rk_stepsize,
         resonance_umax=travis_resonance_umax,
         resonance_grid_points=travis_resonance_grid_points,
+        input_format=travis_input_format,
     )
     travis = run_travis(
         travis_exe, travis_params,

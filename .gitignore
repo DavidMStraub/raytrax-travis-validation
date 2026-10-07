@@ -20,11 +20,24 @@ results/
 # TRAVIS run artifacts
 beamtrace_*
 Pabs_Icd_profiles_*
+PolarWmodePrty_*
+pass_purity_*
+Polar_plasmaVacBound.data
+nT_profiles
+nTZ_profiles_trace
 run.status
+run.status2
+stdout*
 travis_input.data
 mesh.bin4
+mesh_cache*/
 equilibrium.md5
 *.tmp
+
+# Exported equilibria and archives
+w7x.nc
+*.nc
+*.zip
 
 # WandB
 wandb/

@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-COMMON="--step 1 --seed 1 --n-samples 5000 --wandb-project raytrax-validation"
+COMMON="--step 1 --seed 1 --n-samples 1000 --wandb-project raytrax-validation"
 
 echo "============================================================"
 echo " Scan 1/2: high-fidelity raytrax ODE solver"

@@ -86,6 +86,12 @@ class TravisECRHInput:
     """Toroidal mesh step size [deg] (dphi) for the 3D lookup mesh. Default 2° = 10°/N_periods.
     TRAVIS clamps to [1°/N_periods, 10°/N_periods]."""
 
+    accuracy_m: float = 1e-15
+    """Accuracy of TRAVIS's coordinate-inversion iterations (Accuracy_[m]); TRAVIS GUI default."""
+
+    bmn_truncation_level: float = 1e-15
+    """Truncation level of the VMEC Fourier harmonics (Bmn_truncation_level); TRAVIS GUI default."""
+
     rk_accuracy: float = 1e-5
     """RK integrator accuracy (RK_accuracy). Default 1e-5."""
 
@@ -159,6 +165,7 @@ def _equilibrium_hash(params: TravisECRHInput) -> str:
     h = hashlib.md5()
     h.update(Path(params.equilibrium_file).read_bytes())
     h.update(f"hgrid={params.hgrid}|dphi={params.dphi}".encode())
+    h.update(f"|accuracy={params.accuracy_m}|bmn={params.bmn_truncation_level}".encode())
     if params.input_format != "legacy":  # keep legacy hashes (and caches) unchanged
         h.update(f"|format={params.input_format}".encode())
     return h.hexdigest()
@@ -307,14 +314,14 @@ Angle_for_B0_[degree] 0
 Flux_surface_label toroidal_rho
 Use_and_save_mesh {1 if use_mesh else 0} {1 if save_mesh else 0}
 Stellarator_symmetry 1
-Accuracy_[m] 0.001
+Accuracy_[m] {params.accuracy_m}
 gridStep_[m] {params.hgrid}
 gridStep_[degree] {params.dphi}
-Bmn_truncation_level 2e-05
+Bmn_truncation_level {params.bmn_truncation_level}
 Plasma_size(rmax/a)_and_edge_width(dr/a) 1 0
 {plasma_section}
 Central_Zeff 1.5
-Zeff-parm 0 1 1 0 0
+Zeff-parm 1.5 1 1 0 0
 Type_of_distribution_function Maxwell
 File_with_distribution_function nofile
 Adjoint_approach_model lmfp (with trapped particles)

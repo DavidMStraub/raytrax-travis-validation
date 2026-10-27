@@ -11,7 +11,7 @@ The validation is organised in two independent steps:
 | **1 — Trajectory** | `scan.py --step 1` | Ray path (position, ρ, \|B\|, B̂, nₑ, Tₑ) |
 | **2 — Absorption** | `scan.py --step 2` | Absorption coefficient α, optical depth τ, absorbed power, deposition centroid ⟨ρ⟩ |
 
-`scan.py` runs randomised scans with WandB logging. `validate.py` runs a single step-1 reference scenario.
+`scan.py` runs randomised scans with WandB logging. `validate.py` runs a single step-1 reference scenario. `convergence.py` checks the numerical convergence of the Raytrax absorption on the step-2 rays without TRAVIS (see [Resonance-integral convergence](#resonance-integral-convergence)).
 Both steps use the W7-X VMEC equilibrium shipped with `raytrax`, scaled to a chosen on-axis field B₀. Both codes trace with the cold-plasma Hamiltonian.
 
 For each sample a single-ray TRAVIS run is compared with Raytrax. The TRAVIS optical depth is the `tau` column of `beamtrace_1`; the TRAVIS absorbed power is P_in (1 − exp(−τ)). Deposition centroids are the power-weighted mean ρ along the ray, computed in the same way for both codes.
@@ -121,6 +121,16 @@ python travis_case.py 1 --run --travis-exe /path/to/travis-nc                   
 ```
 
 Each `<output-dir>/run_N/travis_input.data` refers to `<output-dir>/w7x.nc` by absolute path. To run TRAVIS by hand, call `travis-nc travis_input.data` inside the run directory.
+
+### Resonance-integral convergence
+
+`convergence.py` tests the Raytrax resonance integral on its own, independently of TRAVIS. It traces the step-2 rays (same sampling and seed as `scan.py`) and evaluates α along each ray, at the trajectory points and at points interpolated between them. Each quadrature setting is compared with a reference of 256 Gauss–Legendre nodes on a window of K = 60 e-foldings of the Maxwell–Jüttner factor. Rays with τ < 0.05 are left out, as in the paper figures.
+
+```bash
+python convergence.py --n-samples 200 --output-dir figures
+```
+
+It writes `fig3_integrand.pdf` (one integrand per mode and harmonic, with the integration window and the nodes) and `fig4_convergence.pdf` (error of α versus node count and versus K), and prints the maximum errors of α and τ per mode and harmonic. It needs a Raytrax version whose absorption functions take `n_quadrature_nodes`.
 
 ## Command-line options of `scan.py`
 

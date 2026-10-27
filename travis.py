@@ -86,11 +86,11 @@ class TravisECRHInput:
     """Toroidal mesh step size [deg] (dphi) for the 3D lookup mesh. Default 2° = 10°/N_periods.
     TRAVIS clamps to [1°/N_periods, 10°/N_periods]."""
 
-    accuracy_m: float = 1e-15
-    """Accuracy of TRAVIS's coordinate-inversion iterations (Accuracy_[m]); TRAVIS GUI default."""
+    accuracy_m: float = 1e-3
+    """Accuracy of TRAVIS's coordinate-inversion iterations (Accuracy_[m])."""
 
-    bmn_truncation_level: float = 1e-15
-    """Truncation level of the VMEC Fourier harmonics (Bmn_truncation_level); TRAVIS GUI default."""
+    bmn_truncation_level: float = 2e-5
+    """Truncation level of the VMEC Fourier harmonics (Bmn_truncation_level)."""
 
     rk_accuracy: float = 1e-5
     """RK integrator accuracy (RK_accuracy). Default 1e-5."""

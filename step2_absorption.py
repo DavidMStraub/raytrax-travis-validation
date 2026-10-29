@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,7 @@ import numpy as np
 from travis import TravisECRHInput, TravisECRHOutput, run_travis, resolve_travis_exe
 from profiles import build_profiles, cylindrical_to_cartesian, interpolate_to_arc
 from sampling import sample_antenna, sample_target, sample_profiles, _eval_rho
+from step1_trajectory import _eval_rx_at_xyz, pad_to_power_of_two
 
 from raytrax.api import trace
 from raytrax.equilibrium.interpolate import (
@@ -40,7 +42,6 @@ from raytrax.equilibrium.interpolate import (
 )
 from raytrax.physics.absorption import absorption_coefficient as rx_absorption_coefficient
 from raytrax.tracer.buffers import Interpolators
-from raytrax.tracer.solver import _eval_magnetic_field, _eval_rho as _eval_rho_rx
 from raytrax.types import Beam, RadialProfiles, TraceResult, TracerSettings
 
 
@@ -432,25 +433,32 @@ def sample_absorption_scenario(
 
 # ── Point-evaluation helpers ──────────────────────────────────────────────────
 
-def _eval_rx_at_xyz(
-    xyz: np.ndarray,
-    interpolators: Interpolators,
-    nfp: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Evaluate B (Cartesian), ρ, nₑ, Tₑ at given Cartesian positions using raytrax.
+@partial(jax.jit, static_argnames="mode")
+def _alpha_jit(B, N, ne, te, frequency, mode: Literal["X", "O"]):
+    return jax.vmap(
+        lambda B, N, ne_val, te_val: rx_absorption_coefficient(
+            refractive_index=N,
+            magnetic_field=B,
+            electron_density_1e20_per_m3=ne_val,
+            electron_temperature_keV=te_val,
+            frequency=frequency,
+            mode=mode,
+        )
+    )(B, N, ne, te)
 
-    Returns:
-        B_xyz : (N, 3) magnetic field vectors [T]
-        rho   : (N,)   normalised effective radius
-        ne    : (N,)   electron density [10²⁰ m⁻³]
-        te    : (N,)   electron temperature [keV]
-    """
-    pos   = jnp.array(xyz)
-    B_xyz = np.array(jax.vmap(lambda p: _eval_magnetic_field(p, interpolators, nfp))(pos))
-    rho   = np.array(jax.vmap(lambda p: _eval_rho_rx(p, interpolators, nfp))(pos))
-    ne    = np.array(jax.vmap(interpolators.electron_density)(jnp.array(rho)))
-    te    = np.array(jax.vmap(interpolators.electron_temperature)(jnp.array(rho)))
-    return B_xyz, rho, ne, te
+
+def _eval_alpha(
+    B: np.ndarray,
+    N: np.ndarray,
+    ne: np.ndarray,
+    te: np.ndarray,
+    frequency_hz: float,
+    mode: Literal["X", "O"],
+) -> np.ndarray:
+    """raytrax α [m⁻¹] at each point, padded so that compiles are reused across samples."""
+    n, padded = pad_to_power_of_two(B, N, ne, te)
+    alpha = _alpha_jit(*map(jnp.asarray, padded), jnp.asarray(frequency_hz), mode)
+    return np.asarray(alpha)[:n]
 
 
 def _eval_alpha_at_tr_xyz(
@@ -476,24 +484,7 @@ def _eval_alpha_at_tr_xyz(
         te    : (N,)  raytrax Tₑ [keV] at TRAVIS xyz
     """
     B_xyz, rho, ne, te = _eval_rx_at_xyz(tr_xyz, interpolators, nfp)
-
-    B_jax  = jnp.array(B_xyz)
-    N_jax  = jnp.array(tr_N)
-    ne_jax = jnp.array(ne)
-    te_jax = jnp.array(te)
-    freq   = jnp.array(frequency_hz)
-
-    alpha = np.array(jax.vmap(
-        lambda B, N, ne_val, te_val: rx_absorption_coefficient(
-            refractive_index=N,
-            magnetic_field=B,
-            electron_density_1e20_per_m3=ne_val,
-            electron_temperature_keV=te_val,
-            frequency=freq,
-            mode=mode,
-        )
-    )(B_jax, N_jax, ne_jax, te_jax))
-
+    alpha = _eval_alpha(B_xyz, tr_N, ne, te, frequency_hz, mode)
     return alpha, B_xyz, rho, ne, te
 
 
@@ -514,22 +505,7 @@ def _eval_alpha_from_tr_inputs(
     Returns:
         alpha : (N,) raytrax α [m⁻¹]
     """
-    B_jax  = jnp.array(tr_B_cart)
-    N_jax  = jnp.array(tr_N)
-    ne_jax = jnp.array(tr_ne)
-    te_jax = jnp.array(tr_te)
-    freq   = jnp.array(frequency_hz)
-
-    return np.array(jax.vmap(
-        lambda B, N, ne_val, te_val: rx_absorption_coefficient(
-            refractive_index=N,
-            magnetic_field=B,
-            electron_density_1e20_per_m3=ne_val,
-            electron_temperature_keV=te_val,
-            frequency=freq,
-            mode=mode,
-        )
-    )(B_jax, N_jax, ne_jax, te_jax))
+    return _eval_alpha(tr_B_cart, tr_N, tr_ne, tr_te, frequency_hz, mode)
 
 
 # ── Comparison ────────────────────────────────────────────────────────────────

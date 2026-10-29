@@ -201,11 +201,10 @@ def _scan_step1(args: argparse.Namespace) -> None:
             log_sample(params, None, step=i, error=str(exc), dry_run=args.dry_run)
             n_fail += 1
 
-        # Clear JAX compilation cache and run GC every 10 samples to prevent OOM.
-        # (Residual per-step accumulation from vmap retracing on variable TRAVIS
-        # output lengths; flushed frequently so it cannot reach GB-scale.)
+        # Don't clear the JAX caches here: that recompiles the trace and inflates the
+        # measured raytrax wall time. Evaluations on TRAVIS points are padded to
+        # power-of-two lengths, so the compile cache stays small.
         if (i + 1) % 10 == 0:
-            jax.clear_caches()
             gc.collect()
 
     tqdm.write(f"\nDone: {n_ok} succeeded, {n_fail} failed.")
@@ -366,9 +365,8 @@ def _scan_step2(args: argparse.Namespace) -> None:
             log_sample(params, None, step=i, error=str(exc), dry_run=args.dry_run)
             n_fail += 1
         
-        # Clear JAX cache and run garbage collection every 100 samples to prevent OOM
+        # No jax.clear_caches(), see _scan_step1.
         if (i + 1) % 100 == 0:
-            jax.clear_caches()
             gc.collect()
 
     tqdm.write(f"\nDone: {n_ok} succeeded, {n_fail} failed.")

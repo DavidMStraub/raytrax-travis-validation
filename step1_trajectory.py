@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Literal
 
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 import jax
@@ -34,36 +35,6 @@ from raytrax.tracer.buffers import Interpolators
 from raytrax.tracer.solver import _eval_magnetic_field, _eval_rho
 from raytrax.types import Beam, RadialProfiles, TraceResult, TracerSettings
 
-
-def compute_direction_sensitivity(
-    eq: MagneticConfiguration,
-    profiles: RadialProfiles,
-    beam: Beam,
-    settings: TracerSettings,
-    eps: float = 1e-3,
-) -> float:
-    """Finite-difference sensitivity of mean trajectory position to initial direction [m/rad].
-
-    Perturbs the initial direction by ±eps radians in a perpendicular direction,
-    traces both rays, and returns the norm of the mean-position difference divided
-    by 2*eps.  Large values mean the trajectory shifts strongly under small direction
-    changes — comparison with TRAVIS is unreliable for those cases.
-    """
-    d = jnp.asarray(beam.direction)
-
-    # Build a unit vector perpendicular to d via Gram-Schmidt.
-    tmp = jnp.where(jnp.abs(d[0]) < 0.9, jnp.array([1.0, 0.0, 0.0]), jnp.array([0.0, 1.0, 0.0]))
-    perp = tmp - jnp.dot(tmp, d) * d
-    perp = perp / jnp.linalg.norm(perp)
-
-    def _exit_pos(direction: jax.Array) -> jax.Array:
-        direction = direction / jnp.linalg.norm(direction)
-        r = trace(eq, profiles, replace(beam, direction=direction), settings=settings)
-        return jnp.asarray(r.beam_profile.position[-1])
-
-    pos_plus  = _exit_pos(d + eps * perp)
-    pos_minus = _exit_pos(d - eps * perp)
-    return float(jnp.linalg.norm(pos_plus - pos_minus) / (2.0 * eps))
 
 # Defaults for ScenarioParams
 _B0_TARGET    = 3.0
@@ -188,9 +159,6 @@ class TrajectoryComparison:
     """Total ray deflection angle [deg] for TRAVIS over the common arc."""
     deflection_diff_deg: float
     """deflection_rx_deg − deflection_tr_deg [deg]."""
-    direction_sensitivity: float = 0.0
-    """Frobenius norm of ∂(final position)/∂(initial direction) [m].
-    Large value → trajectory is sensitive → comparison with TRAVIS is unreliable."""
     travis_wall_time_s:  float = 0.0
     raytrax_wall_time_s: float = 0.0
     n_steps_rx:          int   = 0
@@ -248,6 +216,34 @@ def _ray_curvature(pos: np.ndarray, s: np.ndarray, ds_min: float = 1e-3) -> np.n
     return out
 
 
+def pad_to_power_of_two(*arrays: np.ndarray) -> tuple[int, list[np.ndarray]]:
+    """Pad arrays along axis 0 to the next power of two by repeating the last row.
+
+    Jitted evaluations on TRAVIS points then compile once per length bucket
+    instead of once per TRAVIS output length.
+
+    Returns:
+        n      : original length, to slice the results back
+        padded : the padded arrays
+    """
+    n = len(arrays[0])
+    m = 1 << max(n - 1, 0).bit_length()
+    padded = [
+        np.pad(a, [(0, m - n)] + [(0, 0)] * (a.ndim - 1), mode="edge" if n else "constant")
+        for a in map(np.asarray, arrays)
+    ]
+    return n, padded
+
+
+@partial(jax.jit, static_argnames="nfp")
+def _eval_rx_at_xyz_jit(pos: jax.Array, interpolators: Interpolators, nfp: int):
+    B_xyz = jax.vmap(lambda p: _eval_magnetic_field(p, interpolators, nfp))(pos)
+    rho   = jax.vmap(lambda p: _eval_rho(p, interpolators, nfp))(pos)
+    ne    = jax.vmap(interpolators.electron_density)(rho)
+    te    = jax.vmap(interpolators.electron_temperature)(rho)
+    return B_xyz, rho, ne, te
+
+
 def _eval_rx_at_xyz(
     xyz: np.ndarray,
     interpolators: Interpolators,
@@ -261,11 +257,9 @@ def _eval_rx_at_xyz(
         ne    : (N,)   electron density [10²⁰ m⁻³]
         te    : (N,)   electron temperature [keV]
     """
-    pos = jnp.array(xyz)
-    B_xyz = np.array(jax.vmap(lambda p: _eval_magnetic_field(p, interpolators, nfp))(pos))
-    rho   = np.array(jax.vmap(lambda p: _eval_rho(p, interpolators, nfp))(pos))
-    ne    = np.array(jax.vmap(interpolators.electron_density)(jnp.array(rho)))
-    te    = np.array(jax.vmap(interpolators.electron_temperature)(jnp.array(rho)))
+    n, (pos,) = pad_to_power_of_two(xyz)
+    out = _eval_rx_at_xyz_jit(jnp.asarray(pos), interpolators, nfp)
+    B_xyz, rho, ne, te = (np.asarray(a)[:n] for a in out)
     return B_xyz, rho, ne, te
 
 
@@ -493,7 +487,6 @@ def print_trajectory_report(cmp: TrajectoryComparison) -> None:
         row("nₑ mean error @xyz",     cmp.ne_at_tr_xyz_mean_err_pct,   "%",   THRESH_NE_PCT)
         row("Tₑ mean error @xyz",     cmp.te_at_tr_xyz_mean_err_pct,   "%",   THRESH_TE_PCT)
         row("ρ RMS @xyz",              cmp.rho_at_tr_xyz_rms,            "",    THRESH_RHO_RMS)
-    row("Direction sensitivity",  cmp.direction_sensitivity, "m")
     print(f"  {'ODE steps (raytrax)':<28} {cmp.n_steps_rx:>8d}")
     print()
     print(f"  {'Deflection':28}  {'raytrax':>8}    {'TRAVIS':>8}    {'diff':>8}")
@@ -645,10 +638,6 @@ def run_scenario(
         b0_target=params.b0_target,
         interpolators=interpolators,
         nfp=eq.nfp,
-    )
-    cmp.direction_sensitivity = compute_direction_sensitivity(
-        eq, profiles, beam,
-        settings=TracerSettings(max_step_size=max_step_size, relative_tolerance=rtol, absolute_tolerance=atol),
     )
     cmp.travis_wall_time_s = travis_time
     cmp.raytrax_wall_time_s = raytrax_time

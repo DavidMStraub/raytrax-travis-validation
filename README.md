@@ -88,7 +88,7 @@ On the common arc-length grid (the threshold is the pass/fail level in the print
 
 Evaluated at the TRAVIS positions (no interpolation along the ray), with the same thresholds: `B_mag_at_tr_xyz_mean_err_pct`, `B_dir_at_tr_xyz_rms_deg`, `ne_at_tr_xyz_mean_err_pct`, `te_at_tr_xyz_mean_err_pct`, `rho_at_tr_xyz_rms`.
 
-Further logged quantities: ray extrema (`min_rho_*`, `max_ne_*`, `max_te_*`), `arc_in_plasma_*_m`, `max_curvature_*_m_inv`, `deflection_*_deg`, `Y_param` (f_ce / f), `direction_sensitivity`, wall times and `n_steps_rx`.
+Further logged quantities: ray extrema (`min_rho_*`, `max_ne_*`, `max_te_*`), `arc_in_plasma_*_m`, `max_curvature_*_m_inv`, `deflection_*_deg`, `Y_param` (f_ce / f), wall times and `n_steps_rx`.
 
 ## Step 2 — Absorption validation
 

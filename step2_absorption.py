@@ -218,6 +218,15 @@ class AbsorptionComparison:
     alpha_from_tr_inputs_rms_pct: float = 0.0
     """RMS of alpha_rx_from_tr_inputs_diff_rel in percent."""
 
+    # ── diagnostic: optical depth along the TRAVIS ray ───────────────────────
+    # ∫α ds over the compared part of the TRAVIS ray, relative to TRAVIS's ∫α ds.
+
+    tau_at_tr_xyz_rel_err: float = float("nan")
+    """(∫α_rx@xyz ds − ∫α_tr ds) / ∫α_tr ds."""
+
+    tau_from_tr_inputs_rel_err: float = float("nan")
+    """(∫α_rx_from_tr_inputs ds − ∫α_tr ds) / ∫α_tr ds."""
+
     # ── metadata
     harmonic:           int   = 2
     mode:               str   = "X"
@@ -635,6 +644,9 @@ def compare_absorption(
     alpha_tr_inputs_drel = None
     alpha_tr_inputs_pct  = 0.0
 
+    tau_at_xyz_rel_err    = float("nan")
+    tau_tr_inputs_rel_err = float("nan")
+
     if interpolators is not None:
         tr_xyz_c = np.asarray(tr.position_m)[mask_tr]          # (N, 3) Cartesian
         tr_N_c   = np.asarray(tr.refractive_index)[mask_tr]    # (N, 3)
@@ -668,6 +680,10 @@ def compare_absorption(
             )
             alpha_tr_inputs_drel = (alpha_tr_inputs - alpha_tr_c) / alpha_ref
             alpha_tr_inputs_pct  = float(np.sqrt(np.mean(alpha_tr_inputs_drel**2)) * 100.0)
+
+            tau_tr_seg = max(float(np.trapezoid(alpha_tr_c, s_common)), 1e-6)
+            tau_at_xyz_rel_err = float(np.trapezoid(alpha_at_xyz, s_common)) / tau_tr_seg - 1.0
+            tau_tr_inputs_rel_err = float(np.trapezoid(alpha_tr_inputs, s_common)) / tau_tr_seg - 1.0
 
     return AbsorptionComparison(
         s_common=s_common,
@@ -704,6 +720,8 @@ def compare_absorption(
         alpha_rx_from_tr_inputs=alpha_tr_inputs,
         alpha_rx_from_tr_inputs_diff_rel=alpha_tr_inputs_drel,
         alpha_from_tr_inputs_rms_pct=alpha_tr_inputs_pct,
+        tau_at_tr_xyz_rel_err=tau_at_xyz_rel_err,
+        tau_from_tr_inputs_rel_err=tau_tr_inputs_rel_err,
     )
 
 
@@ -825,6 +843,7 @@ def run_absorption_scenario(
     travis_resonance_umax: float = 7.0,
     travis_resonance_grid_points: int = 700,
     travis_input_format: str = "legacy",
+    alpha_diagnostics: bool = False,
 ) -> AbsorptionComparison:
     """Run one TRAVIS + raytrax absorption scenario and return the comparison.
 
@@ -938,6 +957,7 @@ travis_resonance_umax / travis_resonance_grid_points: Upper velocity limit
         nfp=eq.nfp,
         frequency_hz=params.frequency_ghz * 1e9,
         mode=params.mode,
+        skip_expensive_diagnostics=not alpha_diagnostics,
     )
     t_cmp = time.perf_counter() - t0_cmp
     if verbose:

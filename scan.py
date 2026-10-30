@@ -357,6 +357,7 @@ def _scan_step2(args: argparse.Namespace) -> None:
                 travis_resonance_umax=args.travis_resonance_umax,
                 travis_resonance_grid_points=args.travis_resonance_grid_points,
                 travis_input_format=args.travis_input_format,
+                alpha_diagnostics=args.alpha_diagnostics,
             )
             log_sample(params, cmp, step=i, dry_run=args.dry_run)
             n_ok += 1
@@ -420,6 +421,8 @@ def main() -> None:
                         help="TRAVIS upper velocity for resonance integral in u/u_th (umaxgrid, default 7; use 35 for O2 mode).")
     parser.add_argument("--travis-resonance-grid-points", type=int, default=700,
                         help="TRAVIS u_par grid points for resonance integral (nugrid, default 700; use 1500 for O2 mode).")
+    parser.add_argument("--alpha-diagnostics", action="store_true",
+                        help="Step 2: also evaluate raytrax α and τ along the TRAVIS ray.")
     args = parser.parse_args()
 
     if args.wandb_group is None:

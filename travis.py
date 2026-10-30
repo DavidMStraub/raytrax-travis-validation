@@ -367,7 +367,8 @@ def _execute_travis(travis_executable: Path, output_dir: Path) -> None:
         cwd=output_dir,
         capture_output=True,
         text=True,
-        timeout=300,
+        # A ray takes well under a second; runs that get stuck never finish.
+        timeout=10,
     )
 
     status_file = output_dir / "run.status"

@@ -207,15 +207,13 @@ def _run_travis_internal(
     use_cached = mesh_cache_dir is not None and _mesh_cache_valid(mesh_cache_dir, params)
     if use_cached:
         assert mesh_cache_dir is not None
-        shutil.copy2(mesh_cache_dir / _MESH_FILE, output_dir / _MESH_FILE)
-
-    if use_cached:
-        # mesh.bin4 contains both equilibrium data and mesh — use it directly so
-        # TRAVIS loads the pre-built mesh without regenerating it.
+        # mesh.bin4 contains both equilibrium data and mesh — TRAVIS reads it from
+        # the cache without regenerating it. It is not copied into the run
+        # directory, since a fine mesh takes hundreds of MB.
         _write_travis_input_files(
             params, output_dir,
             use_mesh=True, save_mesh=False,
-            equilibrium_override=output_dir / _MESH_FILE,
+            equilibrium_override=(mesh_cache_dir / _MESH_FILE).resolve(),
         )
     else:
         # Build mesh from VMEC with the requested hgrid/dphi resolution.
@@ -230,7 +228,7 @@ def _run_travis_internal(
         mesh_file = output_dir / _MESH_FILE
         if mesh_file.exists():
             mesh_cache_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(mesh_file, mesh_cache_dir / _MESH_FILE)
+            shutil.move(mesh_file, mesh_cache_dir / _MESH_FILE)
             (mesh_cache_dir / _MESH_HASH_FILE).write_text(_equilibrium_hash(params))
 
     return _parse_travis_output(output_dir, params.power_mw)
